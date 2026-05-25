@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+jobs:
+  validate-compose:
+    name: Validate docker compose
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Validate compose config
+        run: docker compose -f docker-compose.yml config
+
+      # Basic smoke check that dependencies can start.
+      - name: Start dependencies
+        run: docker compose up -d --wait
+
+      - name: Qdrant health
+        run: curl -fsS http://localhost:6333/healthz
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
