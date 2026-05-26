@@ -36,11 +36,6 @@ services:
       - "${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
     restart: unless-stopped
 
 volumes:

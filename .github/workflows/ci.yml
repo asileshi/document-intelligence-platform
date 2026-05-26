@@ -25,8 +25,21 @@ jobs:
       - name: Start dependencies
         run: docker compose up -d --wait
 
-      - name: Qdrant health
-        run: curl -fsS http://localhost:6333/healthz
+      - name: Wait for Qdrant
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:6333/healthz >/dev/null; then
+              echo "Qdrant is ready"
+              exit 0
+            fi
+            echo "Waiting for Qdrant... ($i/30)"
+            sleep 2
+          done
+
+          echo "Qdrant did not become ready in time"
+          docker compose ps
+          docker compose logs qdrant
+          exit 1
 
       - name: Tear down
         if: always()
