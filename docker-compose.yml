@@ -16,6 +16,10 @@ services:
     environment:
       WORKER_ENV: dev
       PORT: 9001
+      REDIS_ADDR: redis:6379
+      REDIS_QUEUE: ingestion:jobs
+    depends_on:
+      - redis
     restart: unless-stopped
 
   postgres:
