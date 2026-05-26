@@ -8,6 +8,16 @@ services:
       API_ENV: dev
     restart: unless-stopped
 
+  ingestion-worker:
+    build:
+      context: ./services/ingestion-worker
+    ports:
+      - "9001:9001"
+    environment:
+      WORKER_ENV: dev
+      PORT: 9001
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:

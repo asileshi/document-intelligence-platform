@@ -8,6 +8,7 @@ help:
 	@echo ""
 	@echo "Docker Compose:"
 	@echo "  up            Build & start services"
+	@echo "  stop          Stop services (keep volumes)"
 	@echo "  down          Stop services and remove volumes"
 	@echo "  ps            Show running services"
 	@echo "  logs          Tail service logs"
@@ -23,10 +24,13 @@ help:
 	@echo "CI-like:"
 	@echo "  ci            Run api-check + compose smoke checks"
 
-.PHONY: up down ps logs build restart clean
+.PHONY: up stop down ps logs build restart clean
 
 up:
 	$(COMPOSE) up -d --build
+
+stop:
+	$(COMPOSE) stop
 
 down:
 	$(COMPOSE) down -v
