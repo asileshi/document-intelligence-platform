@@ -1,4 +1,13 @@
 services:
+  api:
+    build:
+      context: ./services/api
+    ports:
+      - "8000:8000"
+    environment:
+      API_ENV: dev
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
