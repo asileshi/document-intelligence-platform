@@ -6,6 +6,8 @@ services:
       - "8000:8000"
     environment:
       API_ENV: dev
+      REDIS_URL: redis://redis:6379/0
+      REDIS_QUEUE: ingestion:jobs
     restart: unless-stopped
 
   ingestion-worker:

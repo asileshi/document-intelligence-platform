@@ -1,13 +1,14 @@
 from fastapi import FastAPI
 
-app = FastAPI(title="Document Intelligence Platform API")
+from app.api.routes.ingestion import router as ingestion_router
+from app.api.routes.meta import router as meta_router
 
 
-@app.get("/health")
-def health() -> dict:
-    return {"status": "ok"}
+def create_app() -> FastAPI:
+    app = FastAPI(title="Document Intelligence Platform API")
+    app.include_router(meta_router)
+    app.include_router(ingestion_router)
+    return app
 
 
-@app.get("/version")
-def version() -> dict:
-    return {"service": "api", "version": "0.0.0"}
+app = create_app()
