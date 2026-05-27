@@ -19,6 +19,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
       - name: Show Docker versions
         run: |
           docker version
@@ -41,6 +46,19 @@ jobs:
       - name: Test API (pytest)
         run: pytest -q
         working-directory: services/api
+
+      - name: Format check Go (gofmt)
+        working-directory: services/ingestion-worker
+        run: |
+          test -z "$(gofmt -l .)"
+
+      - name: Test Go (go test)
+        working-directory: services/ingestion-worker
+        run: go test ./...
+
+      - name: Vet Go (go vet)
+        working-directory: services/ingestion-worker
+        run: go vet ./...
 
       # Basic smoke check that dependencies can start.
       - name: Start dependencies
