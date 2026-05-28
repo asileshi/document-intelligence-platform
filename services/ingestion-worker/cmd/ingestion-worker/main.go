@@ -36,12 +36,6 @@ type ingestionJob struct {
 	Payload map[string]any `json:"payload"`
 }
 
-type deadletterEntry struct {
-	Error string `json:"error"`
-	Raw   string `json:"raw"`
-	TS    string `json:"ts"`
-}
-
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -64,9 +58,15 @@ func main() {
 	if redisProcessedQueue == "" {
 		redisProcessedQueue = "ingestion:processed"
 	}
-	redisDeadletterQueue := os.Getenv("REDIS_DEADLETTER_QUEUE")
-	if redisDeadletterQueue == "" {
-		redisDeadletterQueue = "ingestion:deadletter"
+	redisJobStatusPrefix := os.Getenv("REDIS_JOB_STATUS_PREFIX")
+	if redisJobStatusPrefix == "" {
+		redisJobStatusPrefix = "ingestion:job"
+	}
+	jobStatusTTLSeconds := int64(604800)
+	if v := strings.TrimSpace(os.Getenv("JOB_STATUS_TTL_SECONDS")); v != "" {
+		if parsed, err := parseInt64(v); err == nil && parsed > 0 {
+			jobStatusTTLSeconds = parsed
+		}
 	}
 
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
@@ -82,7 +82,8 @@ func main() {
 		"addr", redisAddr,
 		"queue", redisQueue,
 		"processed_queue", redisProcessedQueue,
-		"deadletter_queue", redisDeadletterQueue,
+		"job_status_prefix", redisJobStatusPrefix,
+		"job_status_ttl_seconds", jobStatusTTLSeconds,
 	)
 
 	mux := http.NewServeMux()
@@ -108,7 +109,7 @@ func main() {
 	}()
 
 	go func() {
-		if err := runWorker(ctx, logger, rdb, redisQueue, redisProcessedQueue, redisDeadletterQueue); err != nil && !errors.Is(err, context.Canceled) {
+		if err := runWorker(ctx, logger, rdb, redisQueue, redisProcessedQueue, redisJobStatusPrefix, jobStatusTTLSeconds); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("worker stopped unexpectedly", "err", err)
 			os.Exit(1)
 		}
@@ -132,13 +133,14 @@ func runWorker(
 	rdb *redis.Client,
 	queue string,
 	processedQueue string,
-	deadletterQueue string,
+	jobStatusPrefix string,
+	jobStatusTTLSeconds int64,
 ) error {
 	logger.Info(
 		"worker loop starting",
 		"queue", queue,
 		"processed_queue", processedQueue,
-		"deadletter_queue", deadletterQueue,
+		"job_status_prefix", jobStatusPrefix,
 	)
 	for {
 		select {
@@ -172,38 +174,39 @@ func runWorker(
 
 		job, err := parseJob(payload)
 		if err != nil {
-			logger.Warn("job parse failed", "err", err)
-			dlqPayload, marshalErr := makeDeadletterPayload(payload, err)
-			if marshalErr != nil {
-				logger.Error("deadletter marshal failed", "err", marshalErr)
-				continue
-			}
-			if pushErr := rdb.LPush(ctx, deadletterQueue, dlqPayload).Err(); pushErr != nil {
-				// Never crash on bad jobs; log and move on.
-				logger.Error("deadletter push failed", "err", pushErr)
-				continue
-			}
+			// For now we only track successful jobs.
+			logger.Warn("job parse failed; dropping", "err", err)
 			continue
 		}
 
 		logger.Info("job processed", "job_id", job.JobID, "source", job.Source)
-		if err := rdb.LPush(ctx, processedQueue, job.JobID).Err(); err != nil {
-			return fmt.Errorf("ack failed: %w", err)
+
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		statusKey := fmt.Sprintf("%s:%s", jobStatusPrefix, job.JobID)
+		tx := rdb.TxPipeline()
+		tx.LPush(ctx, processedQueue, job.JobID)
+		tx.HSet(
+			ctx,
+			statusKey,
+			"job_id", job.JobID,
+			"status", "processed",
+			"processed_at", now,
+			"updated_at", now,
+		)
+		tx.Expire(ctx, statusKey, time.Duration(jobStatusTTLSeconds)*time.Second)
+		if _, err := tx.Exec(ctx); err != nil {
+			return fmt.Errorf("ack/status transaction failed: %w", err)
 		}
 	}
 }
 
-func makeDeadletterPayload(raw string, cause error) (string, error) {
-	entry := deadletterEntry{
-		Error: cause.Error(),
-		Raw:   raw,
-		TS:    time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	b, err := json.Marshal(entry)
+func parseInt64(s string) (int64, error) {
+	var n int64
+	_, err := fmt.Sscanf(s, "%d", &n)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	return string(b), nil
+	return n, nil
 }
 
 func parseJob(raw string) (ingestionJob, error) {

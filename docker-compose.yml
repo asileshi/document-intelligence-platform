@@ -8,6 +8,7 @@ services:
       API_ENV: dev
       REDIS_URL: redis://redis:6379/0
       REDIS_QUEUE: ingestion:jobs
+      REDIS_JOB_STATUS_PREFIX: ingestion:job
     restart: unless-stopped
 
   ingestion-worker:
@@ -21,7 +22,8 @@ services:
       REDIS_ADDR: redis:6379
       REDIS_QUEUE: ingestion:jobs
       REDIS_PROCESSED_QUEUE: ingestion:processed
-      REDIS_DEADLETTER_QUEUE: ingestion:deadletter
+      REDIS_JOB_STATUS_PREFIX: ingestion:job
+      JOB_STATUS_TTL_SECONDS: 604800
     depends_on:
       - redis
     restart: unless-stopped

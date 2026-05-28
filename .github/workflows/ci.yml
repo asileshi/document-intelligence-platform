@@ -113,6 +113,7 @@ jobs:
           exit 1
 
       - name: Enqueue job and wait for ACK
+        id: enqueue_job
         run: |
           resp=$(curl -fsS -X POST http://localhost:8000/ingestion/jobs \
             -H 'Content-Type: application/json' \
@@ -120,6 +121,7 @@ jobs:
 
           job_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["job_id"])' "$resp")
           echo "Enqueued job_id=$job_id"
+          echo "job_id=$job_id" >> "$GITHUB_OUTPUT"
 
           for i in {1..30}; do
             if docker compose -f docker-compose.yml exec -T redis redis-cli LPOS ingestion:processed "$job_id" | grep -Eq '^[0-9]+$'; then
@@ -135,25 +137,24 @@ jobs:
           docker compose -f docker-compose.yml logs ingestion-worker
           exit 1
 
-      - name: Enqueue invalid job and wait for DLQ
+      - name: Wait for job status to be processed
         run: |
-          docker compose -f docker-compose.yml exec -T redis redis-cli DEL ingestion:deadletter
-
-          bad_payload='not-json-ci'
-          docker compose -f docker-compose.yml exec -T redis redis-cli LPUSH ingestion:jobs "$bad_payload"
-          echo "Enqueued invalid payload=$bad_payload"
+          job_id='${{ steps.enqueue_job.outputs.job_id }}'
+          echo "Checking status for job_id=$job_id"
 
           for i in {1..30}; do
-            if docker compose -f docker-compose.yml exec -T redis redis-cli --raw LRANGE ingestion:deadletter 0 50 | grep -F '"raw":"not-json-ci"' >/dev/null; then
-              echo "DLQ received payload=$bad_payload"
+            status_resp=$(curl -fsS "http://localhost:8000/ingestion/jobs/$job_id" || true)
+            status=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("status", ""))' "$status_resp" 2>/dev/null || true)
+            if [ "$status" = "processed" ]; then
+              echo "Status is processed for job_id=$job_id"
               exit 0
             fi
-            echo "Waiting for DLQ... ($i/30)"
+            echo "Waiting for status=processed... ($i/30)";
             sleep 2
           done
 
-          echo "DLQ not received in time for payload=$bad_payload"
-          docker compose -f docker-compose.yml exec -T redis redis-cli --raw LRANGE ingestion:deadletter 0 50
+          echo "Status did not become processed in time for job_id=$job_id"
+          curl -fsS "http://localhost:8000/ingestion/jobs/$job_id" || true
           docker compose -f docker-compose.yml logs ingestion-worker
           exit 1
 
