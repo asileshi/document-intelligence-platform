@@ -36,6 +36,12 @@ type ingestionJob struct {
 	Payload map[string]any `json:"payload"`
 }
 
+type deadletterEntry struct {
+	Error string `json:"error"`
+	Raw   string `json:"raw"`
+	TS    string `json:"ts"`
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -58,6 +64,10 @@ func main() {
 	if redisProcessedQueue == "" {
 		redisProcessedQueue = "ingestion:processed"
 	}
+	redisDeadletterQueue := os.Getenv("REDIS_DEADLETTER_QUEUE")
+	if redisDeadletterQueue == "" {
+		redisDeadletterQueue = "ingestion:deadletter"
+	}
 
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
 	defer func() {
@@ -67,7 +77,13 @@ func main() {
 		logger.Error("redis ping failed", "addr", redisAddr, "err", err)
 		os.Exit(1)
 	}
-	logger.Info("redis connected", "addr", redisAddr, "queue", redisQueue)
+	logger.Info(
+		"redis connected",
+		"addr", redisAddr,
+		"queue", redisQueue,
+		"processed_queue", redisProcessedQueue,
+		"deadletter_queue", redisDeadletterQueue,
+	)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
@@ -92,7 +108,7 @@ func main() {
 	}()
 
 	go func() {
-		if err := runWorker(ctx, logger, rdb, redisQueue, redisProcessedQueue); err != nil && !errors.Is(err, context.Canceled) {
+		if err := runWorker(ctx, logger, rdb, redisQueue, redisProcessedQueue, redisDeadletterQueue); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("worker stopped unexpectedly", "err", err)
 			os.Exit(1)
 		}
@@ -110,8 +126,20 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func runWorker(ctx context.Context, logger *slog.Logger, rdb *redis.Client, queue string, processedQueue string) error {
-	logger.Info("worker loop starting", "queue", queue, "processed_queue", processedQueue)
+func runWorker(
+	ctx context.Context,
+	logger *slog.Logger,
+	rdb *redis.Client,
+	queue string,
+	processedQueue string,
+	deadletterQueue string,
+) error {
+	logger.Info(
+		"worker loop starting",
+		"queue", queue,
+		"processed_queue", processedQueue,
+		"deadletter_queue", deadletterQueue,
+	)
 	for {
 		select {
 		case <-ctx.Done():
@@ -145,6 +173,16 @@ func runWorker(ctx context.Context, logger *slog.Logger, rdb *redis.Client, queu
 		job, err := parseJob(payload)
 		if err != nil {
 			logger.Warn("job parse failed", "err", err)
+			dlqPayload, marshalErr := makeDeadletterPayload(payload, err)
+			if marshalErr != nil {
+				logger.Error("deadletter marshal failed", "err", marshalErr)
+				continue
+			}
+			if pushErr := rdb.LPush(ctx, deadletterQueue, dlqPayload).Err(); pushErr != nil {
+				// Never crash on bad jobs; log and move on.
+				logger.Error("deadletter push failed", "err", pushErr)
+				continue
+			}
 			continue
 		}
 
@@ -153,6 +191,19 @@ func runWorker(ctx context.Context, logger *slog.Logger, rdb *redis.Client, queu
 			return fmt.Errorf("ack failed: %w", err)
 		}
 	}
+}
+
+func makeDeadletterPayload(raw string, cause error) (string, error) {
+	entry := deadletterEntry{
+		Error: cause.Error(),
+		Raw:   raw,
+		TS:    time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	b, err := json.Marshal(entry)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 func parseJob(raw string) (ingestionJob, error) {

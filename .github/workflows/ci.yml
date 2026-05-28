@@ -135,6 +135,28 @@ jobs:
           docker compose -f docker-compose.yml logs ingestion-worker
           exit 1
 
+      - name: Enqueue invalid job and wait for DLQ
+        run: |
+          docker compose -f docker-compose.yml exec -T redis redis-cli DEL ingestion:deadletter
+
+          bad_payload='not-json-ci'
+          docker compose -f docker-compose.yml exec -T redis redis-cli LPUSH ingestion:jobs "$bad_payload"
+          echo "Enqueued invalid payload=$bad_payload"
+
+          for i in {1..30}; do
+            if docker compose -f docker-compose.yml exec -T redis redis-cli --raw LRANGE ingestion:deadletter 0 50 | grep -F '"raw":"not-json-ci"' >/dev/null; then
+              echo "DLQ received payload=$bad_payload"
+              exit 0
+            fi
+            echo "Waiting for DLQ... ($i/30)"
+            sleep 2
+          done
+
+          echo "DLQ not received in time for payload=$bad_payload"
+          docker compose -f docker-compose.yml exec -T redis redis-cli --raw LRANGE ingestion:deadletter 0 50
+          docker compose -f docker-compose.yml logs ingestion-worker
+          exit 1
+
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.yml down -v || true

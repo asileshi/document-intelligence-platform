@@ -21,6 +21,7 @@ services:
       REDIS_ADDR: redis:6379
       REDIS_QUEUE: ingestion:jobs
       REDIS_PROCESSED_QUEUE: ingestion:processed
+      REDIS_DEADLETTER_QUEUE: ingestion:deadletter
     depends_on:
       - redis
     restart: unless-stopped
