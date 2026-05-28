@@ -54,6 +54,10 @@ func main() {
 	if redisQueue == "" {
 		redisQueue = "ingestion:jobs"
 	}
+	redisProcessedQueue := os.Getenv("REDIS_PROCESSED_QUEUE")
+	if redisProcessedQueue == "" {
+		redisProcessedQueue = "ingestion:processed"
+	}
 
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
 	defer func() {
@@ -88,7 +92,7 @@ func main() {
 	}()
 
 	go func() {
-		if err := runWorker(ctx, logger, rdb, redisQueue); err != nil && !errors.Is(err, context.Canceled) {
+		if err := runWorker(ctx, logger, rdb, redisQueue, redisProcessedQueue); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("worker stopped unexpectedly", "err", err)
 			os.Exit(1)
 		}
@@ -106,8 +110,8 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func runWorker(ctx context.Context, logger *slog.Logger, rdb *redis.Client, queue string) error {
-	logger.Info("worker loop starting", "queue", queue)
+func runWorker(ctx context.Context, logger *slog.Logger, rdb *redis.Client, queue string, processedQueue string) error {
+	logger.Info("worker loop starting", "queue", queue, "processed_queue", processedQueue)
 	for {
 		select {
 		case <-ctx.Done():
@@ -145,6 +149,9 @@ func runWorker(ctx context.Context, logger *slog.Logger, rdb *redis.Client, queu
 		}
 
 		logger.Info("job processed", "job_id", job.JobID, "source", job.Source)
+		if err := rdb.LPush(ctx, processedQueue, job.JobID).Err(); err != nil {
+			return fmt.Errorf("ack failed: %w", err)
+		}
 	}
 }
 

@@ -96,6 +96,45 @@ jobs:
           docker compose -f docker-compose.yml logs api
           exit 1
 
+      - name: Wait for ingestion worker
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:9001/health >/dev/null; then
+              echo "Ingestion worker is ready"
+              exit 0
+            fi
+            echo "Waiting for ingestion worker... ($i/30)"
+            sleep 2
+          done
+
+          echo "Ingestion worker did not become ready in time"
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml logs ingestion-worker
+          exit 1
+
+      - name: Enqueue job and wait for ACK
+        run: |
+          resp=$(curl -fsS -X POST http://localhost:8000/ingestion/jobs \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"hello from ci","source":"ci"}')
+
+          job_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["job_id"])' "$resp")
+          echo "Enqueued job_id=$job_id"
+
+          for i in {1..30}; do
+            if docker compose -f docker-compose.yml exec -T redis redis-cli LPOS ingestion:processed "$job_id" | grep -Eq '^[0-9]+$'; then
+              echo "ACK received for job_id=$job_id"
+              exit 0
+            fi
+            echo "Waiting for ACK... ($i/30)"
+            sleep 2
+          done
+
+          echo "ACK not received in time for job_id=$job_id"
+          docker compose -f docker-compose.yml exec -T redis redis-cli LRANGE ingestion:processed 0 50
+          docker compose -f docker-compose.yml logs ingestion-worker
+          exit 1
+
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.yml down -v || true
