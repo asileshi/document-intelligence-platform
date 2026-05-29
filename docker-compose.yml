@@ -24,8 +24,14 @@ services:
       REDIS_PROCESSED_QUEUE: ingestion:processed
       REDIS_JOB_STATUS_PREFIX: ingestion:job
       JOB_STATUS_TTL_SECONDS: 604800
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: documents
+      EMBEDDING_DIM: 8
+      CHUNK_SIZE: 800
+      CHUNK_OVERLAP: 100
     depends_on:
       - redis
+      - qdrant
     restart: unless-stopped
 
   postgres:

@@ -35,4 +35,10 @@ type Config struct {
 	RedisAddr           string
 	Keys                RedisKeys
 	JobStatusTTLSeconds int64
+
+	QdrantURL        string
+	QdrantCollection string
+	EmbeddingDim     int
+	ChunkSize        int
+	ChunkOverlap     int
 }

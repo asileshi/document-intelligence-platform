@@ -158,6 +158,24 @@ jobs:
           docker compose -f docker-compose.yml logs ingestion-worker
           exit 1
 
+      - name: Verify chunks exist in Qdrant
+        run: |
+          job_id='${{ steps.enqueue_job.outputs.job_id }}'
+          echo "Checking Qdrant points for job_id=$job_id"
+
+          resp=$(curl -fsS -X POST "http://localhost:6333/collections/documents/points/scroll" \
+            -H 'Content-Type: application/json' \
+            -d "{\"limit\": 10, \"with_payload\": true, \"filter\": {\"must\": [{\"key\": \"job_id\", \"match\": {\"value\": \"$job_id\"}}]}}")
+
+          count=$(python -c 'import json,sys; data=json.loads(sys.argv[1]); print(len(data.get("result", {}).get("points", [])))' "$resp")
+          if [ "$count" -lt 1 ]; then
+            echo "Expected at least 1 point for job_id=$job_id, got $count"
+            echo "$resp"
+            docker compose -f docker-compose.yml logs ingestion-worker
+            exit 1
+          fi
+          echo "Found $count point(s) for job_id=$job_id"
+
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.yml down -v || true

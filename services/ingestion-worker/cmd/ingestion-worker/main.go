@@ -37,7 +37,19 @@ func main() {
 	startHTTPServer(logger, srv, cfg.Port)
 
 	go func() {
-		if err := runWorker(ctx, logger, rdb, cfg.Keys, cfg.JobStatusTTLSeconds); err != nil && !errors.Is(err, context.Canceled) {
+		qdrant := NewQdrantClient(cfg.QdrantURL, cfg.QdrantCollection, cfg.EmbeddingDim)
+		embedder := NewFakeEmbedder(cfg.EmbeddingDim)
+		if err := runWorker(
+			ctx,
+			logger,
+			rdb,
+			cfg.Keys,
+			cfg.JobStatusTTLSeconds,
+			qdrant,
+			embedder,
+			cfg.ChunkSize,
+			cfg.ChunkOverlap,
+		); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("worker stopped unexpectedly", "err", err)
 			os.Exit(1)
 		}

@@ -38,6 +38,35 @@ func loadConfigFromEnv() Config {
 		}
 	}
 
+	qdrantURL := strings.TrimSpace(os.Getenv("QDRANT_URL"))
+	if qdrantURL == "" {
+		qdrantURL = "http://qdrant:6333"
+	}
+	qdrantCollection := strings.TrimSpace(os.Getenv("QDRANT_COLLECTION"))
+	if qdrantCollection == "" {
+		qdrantCollection = "documents"
+	}
+
+	embeddingDim := 8
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_DIM")); v != "" {
+		if parsed, err := parseInt(v); err == nil && parsed > 0 {
+			embeddingDim = parsed
+		}
+	}
+
+	chunkSize := 800
+	if v := strings.TrimSpace(os.Getenv("CHUNK_SIZE")); v != "" {
+		if parsed, err := parseInt(v); err == nil && parsed > 0 {
+			chunkSize = parsed
+		}
+	}
+	chunkOverlap := 100
+	if v := strings.TrimSpace(os.Getenv("CHUNK_OVERLAP")); v != "" {
+		if parsed, err := parseInt(v); err == nil && parsed >= 0 {
+			chunkOverlap = parsed
+		}
+	}
+
 	return Config{
 		Port:      port,
 		RedisAddr: redisAddr,
@@ -47,5 +76,10 @@ func loadConfigFromEnv() Config {
 			JobStatusPrefix: jobStatusPrefix,
 		},
 		JobStatusTTLSeconds: jobStatusTTLSeconds,
+		QdrantURL:           qdrantURL,
+		QdrantCollection:    qdrantCollection,
+		EmbeddingDim:        embeddingDim,
+		ChunkSize:           chunkSize,
+		ChunkOverlap:        chunkOverlap,
 	}
 }
